@@ -3,7 +3,7 @@
 [![CI](https://github.com/gogpu/galloc/actions/workflows/ci.yml/badge.svg)](https://github.com/gogpu/galloc/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/gogpu/galloc.svg)](https://pkg.go.dev/github.com/gogpu/galloc)
 [![codecov](https://codecov.io/gh/gogpu/galloc/branch/main/graph/badge.svg)](https://codecov.io/gh/gogpu/galloc)
-[![Go Report Card](https://goreportcard.com/badge/github.com/gogpu/galloc)](https://goreportcard.com/report/github.com/gogpu/galloc)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13786/badge)](https://www.bestpractices.dev/projects/13786)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/gogpu/galloc)](https://github.com/gogpu/galloc/blob/main/go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
