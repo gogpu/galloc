@@ -57,6 +57,28 @@ func main() {
 }
 ```
 
+## Aligned Allocation
+
+GPU APIs require buffer offsets to be aligned (e.g., 256 bytes for Vulkan uniform buffers). `AllocateAligned` guarantees the returned offset is a multiple of the given alignment:
+
+```go
+// Vulkan uniform buffer: 256-byte alignment.
+alloc := a.AllocateAligned(4096, 256)
+fmt.Printf("Offset: %d (aligned: %v)\n", alloc.Offset, alloc.Offset%256 == 0)
+
+// DX12 texture data: 512-byte alignment.
+tex := a.AllocateAligned(65536, 512)
+
+// Alignment of 0 or 1 is equivalent to Allocate (zero overhead).
+plain := a.AllocateAligned(100, 1)
+
+a.Free(alloc)
+a.Free(tex)
+a.Free(plain)
+```
+
+Alignment must be a power of two. The implementation over-allocates by up to `alignment - 1` bytes; these padding bytes are reclaimed when the allocation is freed.
+
 ## Algorithm
 
 The allocator is based on [TLSF](http://www.gii.upv.es/tlsf/) (Two-Level Segregated Fit) principles adapted for offset-only allocation (no actual memory management).
