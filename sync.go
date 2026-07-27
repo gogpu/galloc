@@ -29,6 +29,14 @@ func (s *SyncAllocator) Allocate(size uint32) Allocation {
 	return s.a.Allocate(size)
 }
 
+// AllocateAligned reserves a contiguous region at an aligned offset.
+// See [Allocator.AllocateAligned] for details.
+func (s *SyncAllocator) AllocateAligned(size, alignment uint32) Allocation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.a.AllocateAligned(size, alignment)
+}
+
 // Free releases a previously-made allocation.
 // See [Allocator.Free] for details.
 func (s *SyncAllocator) Free(alloc Allocation) {

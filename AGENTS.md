@@ -22,6 +22,11 @@ if alloc.Failed() {
 }
 // use alloc.Offset
 a.Free(alloc)
+
+// GPU-aligned allocation (e.g., 256-byte for Vulkan uniform buffers)
+aligned := a.AllocateAligned(4096, 256)
+// aligned.Offset % 256 == 0
+a.Free(aligned)
 ```
 
 For concurrent use: `galloc.NewSync(size, maxAllocs)`.
@@ -29,9 +34,9 @@ For concurrent use: `galloc.NewSync(size, maxAllocs)`.
 ## Architecture
 
 ```
-galloc.go       -- Allocator core: Allocate, Free, coalescing, bin management
+galloc.go       -- Allocator core: Allocate, AllocateAligned, Free, coalescing, bin management
 smallfloat.go   -- SmallFloat uint-to-bin encoding (256 bins, 3-bit mantissa)
-sync.go         -- SyncAllocator (mutex-wrapped Allocator)
+sync.go         -- SyncAllocator (mutex-wrapped Allocator + AllocateAligned)
 doc.go          -- Package documentation
 ```
 

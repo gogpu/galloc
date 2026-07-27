@@ -488,6 +488,220 @@ func TestReuseComplex(t *testing.T) {
 	a.Free(validateAll)
 }
 
+func TestAllocateAlignedBasic(t *testing.T) {
+	a := New(testSize256MB, testMaxAllocs)
+
+	alloc := a.AllocateAligned(256, 256)
+	if alloc.Failed() {
+		t.Fatal("AllocateAligned(256, 256) failed")
+	}
+	if alloc.Offset%256 != 0 {
+		t.Errorf("offset %d not aligned to 256", alloc.Offset)
+	}
+	a.Free(alloc)
+}
+
+func TestAllocateAlignedVariousAlignments(t *testing.T) {
+	tests := []struct {
+		name      string
+		size      uint32
+		alignment uint32
+	}{
+		{"align4", 100, 4},
+		{"align32", 100, 32},
+		{"align64", 100, 64},
+		{"align256_vulkan_uniform", 4096, 256},
+		{"align512_dx12_texture", 4096, 512},
+		{"align65536_dx12_placed", 65536, 65536},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := New(testSize256MB, testMaxAllocs)
+			alloc := a.AllocateAligned(tt.size, tt.alignment)
+			if alloc.Failed() {
+				t.Fatalf("AllocateAligned(%d, %d) failed", tt.size, tt.alignment)
+			}
+			if alloc.Offset%tt.alignment != 0 {
+				t.Errorf("offset %d not aligned to %d", alloc.Offset, tt.alignment)
+			}
+			a.Free(alloc)
+		})
+	}
+}
+
+func TestAllocateAlignedMultiple(t *testing.T) {
+	a := New(testSize256MB, testMaxAllocs)
+
+	allocs := make([]Allocation, 8)
+	for i := range allocs {
+		alloc := a.AllocateAligned(1024, 256)
+		if alloc.Failed() {
+			t.Fatalf("alloc[%d] failed", i)
+		}
+		if alloc.Offset%256 != 0 {
+			t.Errorf("alloc[%d] offset %d not aligned to 256", i, alloc.Offset)
+		}
+		allocs[i] = alloc
+	}
+
+	// Verify non-overlapping: each allocation needs at least 1024 bytes.
+	for i := 1; i < len(allocs); i++ {
+		for j := 0; j < i; j++ {
+			if overlap(allocs[j].Offset, 1024, allocs[i].Offset, 1024) {
+				t.Errorf("alloc[%d] (offset=%d) overlaps alloc[%d] (offset=%d)",
+					i, allocs[i].Offset, j, allocs[j].Offset)
+			}
+		}
+	}
+
+	for _, alloc := range allocs {
+		a.Free(alloc)
+	}
+
+	// After freeing all, full coalescing should restore the entire range.
+	validateAll := a.Allocate(testSize256MB)
+	if validateAll.Failed() {
+		t.Fatal("full re-allocation after aligned frees failed")
+	}
+	a.Free(validateAll)
+}
+
+func TestAllocateAlignedFastPaths(t *testing.T) {
+	a := New(testSize256MB, testMaxAllocs)
+
+	// alignment=0 → fast path to Allocate.
+	alloc0 := a.AllocateAligned(100, 0)
+	if alloc0.Failed() {
+		t.Fatal("AllocateAligned(100, 0) failed")
+	}
+	a.Free(alloc0)
+
+	// alignment=1 → fast path to Allocate.
+	alloc1 := a.AllocateAligned(100, 1)
+	if alloc1.Failed() {
+		t.Fatal("AllocateAligned(100, 1) failed")
+	}
+	a.Free(alloc1)
+}
+
+func TestAllocateAlignedLargerThanSize(t *testing.T) {
+	a := New(testSize256MB, testMaxAllocs)
+
+	// alignment > size is valid (e.g., 16-byte alloc at 256-byte boundary).
+	alloc := a.AllocateAligned(16, 256)
+	if alloc.Failed() {
+		t.Fatal("AllocateAligned(16, 256) failed")
+	}
+	if alloc.Offset%256 != 0 {
+		t.Errorf("offset %d not aligned to 256", alloc.Offset)
+	}
+	a.Free(alloc)
+}
+
+func TestAllocateAlignedNonPowerOfTwoPanics(t *testing.T) {
+	a := New(testSize256MB, testMaxAllocs)
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("AllocateAligned with non-power-of-2 alignment should panic")
+		}
+	}()
+
+	a.AllocateAligned(100, 3)
+}
+
+func TestAllocateAlignedExhaustion(t *testing.T) {
+	// Small allocator — aligned allocations waste padding, should exhaust faster.
+	a := New(1024, 256)
+
+	alloc := a.AllocateAligned(512, 256)
+	if alloc.Failed() {
+		t.Fatal("first aligned allocation failed")
+	}
+	if alloc.Offset%256 != 0 {
+		t.Errorf("offset %d not aligned to 256", alloc.Offset)
+	}
+
+	// Second large aligned alloc may fail due to padding overhead.
+	alloc2 := a.AllocateAligned(512, 256)
+	// Whether it succeeds depends on internal layout; just ensure no panic.
+	if !alloc2.Failed() {
+		a.Free(alloc2)
+	}
+	a.Free(alloc)
+}
+
+func TestAllocateAlignedCoalescing(t *testing.T) {
+	a := New(testSize256MB, testMaxAllocs)
+
+	allocs := make([]Allocation, 4)
+	for i := range allocs {
+		allocs[i] = a.AllocateAligned(4096, 256)
+		if allocs[i].Failed() {
+			t.Fatalf("alloc[%d] failed", i)
+		}
+	}
+
+	// Free in reverse order.
+	for i := len(allocs) - 1; i >= 0; i-- {
+		a.Free(allocs[i])
+	}
+
+	// Full coalescing should restore everything.
+	report := a.StorageReport()
+	if report.TotalFreeSpace != testSize256MB {
+		t.Errorf("TotalFreeSpace = %d, want %d", report.TotalFreeSpace, testSize256MB)
+	}
+}
+
+// overlap checks if two ranges [aOff, aOff+aSize) and [bOff, bOff+bSize) overlap.
+func overlap(aOff, aSize, bOff, bSize uint32) bool {
+	return aOff < bOff+bSize && bOff < aOff+aSize
+}
+
+func TestSyncAllocateAligned(t *testing.T) {
+	s := NewSync(testSize256MB, testMaxAllocs)
+
+	alloc := s.AllocateAligned(4096, 256)
+	if alloc.Failed() {
+		t.Fatal("SyncAllocator.AllocateAligned failed")
+	}
+	if alloc.Offset%256 != 0 {
+		t.Errorf("offset %d not aligned to 256", alloc.Offset)
+	}
+	s.Free(alloc)
+}
+
+func TestSyncAllocateAlignedConcurrent(t *testing.T) {
+	s := NewSync(1024*1024, 4096)
+	const goroutines = 8
+	const opsPerGoroutine = 128
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for g := 0; g < goroutines; g++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < opsPerGoroutine; i++ {
+				alloc := s.AllocateAligned(64, 256)
+				if !alloc.Failed() {
+					if alloc.Offset%256 != 0 {
+						t.Errorf("offset %d not aligned to 256", alloc.Offset)
+					}
+					s.Free(alloc)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	report := s.StorageReport()
+	if report.TotalFreeSpace != 1024*1024 {
+		t.Errorf("after concurrent ops TotalFreeSpace = %d, want %d", report.TotalFreeSpace, 1024*1024)
+	}
+}
+
 func TestSyncAllocatorConcurrent(t *testing.T) {
 	s := NewSync(1024*1024, 4096)
 	const goroutines = 8

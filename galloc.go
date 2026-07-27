@@ -221,6 +221,32 @@ func (a *Allocator) Allocate(size uint32) Allocation {
 	}
 }
 
+// AllocateAligned reserves a contiguous region of the given size at an offset
+// that is a multiple of alignment. Alignment must be a power of two; passing a
+// non-power-of-two value (other than 0) will panic. Alignment of 0 or 1 is
+// equivalent to [Allocate].
+//
+// The implementation over-allocates by up to alignment-1 bytes to guarantee an
+// aligned offset within the block. These padding bytes are reclaimed when the
+// allocation is freed.
+//
+// A size of 0 is treated as a valid allocation (matching [Allocate] behavior).
+func (a *Allocator) AllocateAligned(size, alignment uint32) Allocation {
+	if alignment <= 1 {
+		return a.Allocate(size)
+	}
+	if alignment&(alignment-1) != 0 {
+		panic("galloc: alignment must be a power of two")
+	}
+	padded := size + alignment - 1
+	alloc := a.Allocate(padded)
+	if alloc.Failed() {
+		return alloc
+	}
+	alloc.Offset = (alloc.Offset + alignment - 1) &^ (alignment - 1)
+	return alloc
+}
+
 // Free releases a previously-made allocation, returning its space to the pool.
 // Adjacent free regions are automatically coalesced.
 //

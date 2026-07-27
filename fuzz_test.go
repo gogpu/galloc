@@ -58,3 +58,57 @@ func FuzzAllocFree(f *testing.F) {
 		}
 	})
 }
+
+func FuzzAllocAligned(f *testing.F) {
+	f.Add(uint32(65536), uint8(20), uint16(256), uint8(8))      // align=256
+	f.Add(uint32(1024), uint8(5), uint16(64), uint8(2))         // align=4
+	f.Add(uint32(1024*1024), uint8(50), uint16(4096), uint8(9)) // align=512
+
+	f.Fuzz(func(t *testing.T, totalSize uint32, numOps uint8, allocSize uint16, alignShift uint8) {
+		if totalSize == 0 || totalSize > 1024*1024*16 {
+			return
+		}
+		// Clamp alignment to [1, 65536] as power of 2.
+		alignShift %= 17 // 0..16 → 1..65536
+		alignment := uint32(1) << alignShift
+
+		maxAllocs := uint32(numOps)*2 + 16
+		if maxAllocs > 65536 {
+			maxAllocs = 65536
+		}
+
+		a := New(totalSize, maxAllocs)
+
+		var live []Allocation
+		for i := uint8(0); i < numOps; i++ {
+			size := uint32(allocSize)
+			if size == 0 {
+				size = 1
+			}
+			alloc := a.AllocateAligned(size, alignment)
+			if !alloc.Failed() {
+				if alloc.Offset%alignment != 0 {
+					t.Fatalf("offset %d not aligned to %d", alloc.Offset, alignment)
+				}
+				live = append(live, alloc)
+			}
+
+			if len(live) > 4 && i%3 == 0 {
+				half := len(live) / 2
+				for _, alloc := range live[:half] {
+					a.Free(alloc)
+				}
+				live = live[half:]
+			}
+		}
+
+		for _, alloc := range live {
+			a.Free(alloc)
+		}
+
+		report := a.StorageReport()
+		if report.TotalFreeSpace != totalSize {
+			t.Errorf("after freeing all: TotalFreeSpace = %d, want %d", report.TotalFreeSpace, totalSize)
+		}
+	})
+}

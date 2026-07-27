@@ -87,6 +87,27 @@ func BenchmarkAllocMany(b *testing.B) {
 	}
 }
 
+func BenchmarkAllocateAligned256(b *testing.B) {
+	a := New(1024*1024*256, 1024)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		alloc := a.AllocateAligned(4096, 256)
+		a.Free(alloc)
+	}
+}
+
+func BenchmarkAllocateAligned1(b *testing.B) {
+	// Fast path: alignment=1 should be identical to Allocate.
+	a := New(1024*1024*256, 1024)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		alloc := a.AllocateAligned(256, 1)
+		a.Free(alloc)
+	}
+}
+
 func BenchmarkFragmented(b *testing.B) {
 	// Interleaved alloc/free pattern to stress coalescing.
 	const maxAllocs = 4096

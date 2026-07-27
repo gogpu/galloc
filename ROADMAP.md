@@ -9,8 +9,9 @@
 - [x] Enterprise CI (3 OS, lint, formatting, fuzz, Codecov)
 - [x] 22 tests, 6 benchmarks, fuzz testing
 
-## v0.2.0 — Integration
+## v0.2.0 — Alignment + Integration
 
+- [ ] **FEAT-001: `AllocateAligned(size, alignment)` — per-allocation alignment** (ADR-001)
 - [ ] Integration with `wgpu` Vulkan memory pools (replace BuddyAllocator)
 - [ ] Integration with `wgpu` DX12 descriptor heaps
 - [ ] Extended statistics (per-bin occupancy, fragmentation metrics)
@@ -18,6 +19,7 @@
 
 ## v0.3.0 — Optimization
 
+- [ ] Trim approach for aligned allocation (zero-waste prefix reclaim)
 - [ ] Benchmark suite vs BuddyAllocator (side-by-side comparison)
 - [ ] Memory layout optimization (cache-friendly node pool)
 - [ ] `usedBins [8]uint32` variant (fewer type casts on hot path)
