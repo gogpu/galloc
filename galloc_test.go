@@ -4,6 +4,7 @@
 package galloc
 
 import (
+	"math"
 	"sync"
 	"testing"
 )
@@ -23,6 +24,74 @@ func TestAllocateBasic(t *testing.T) {
 		t.Errorf("first allocation offset = %d, want 0", alloc.Offset)
 	}
 	a.Free(alloc)
+}
+
+func TestSingleAllocationSlotWithRemainder(t *testing.T) {
+	a := New(1024, 1)
+
+	alloc := a.Allocate(1)
+	if alloc.Failed() {
+		t.Fatal("Allocate(1) failed with one allocation slot")
+	}
+	if alloc.Offset != 0 {
+		t.Errorf("allocation offset = %d, want 0", alloc.Offset)
+	}
+	if got := a.AllocationSize(alloc); got != 1 {
+		t.Errorf("AllocationSize = %d, want 1", got)
+	}
+
+	// maxAllocs limits simultaneous allocations. Once the slot is occupied,
+	// another request must fail cleanly even though the remainder is free.
+	beforeFailure := a.StorageReport()
+	if next := a.Allocate(1); !next.Failed() {
+		t.Fatal("second allocation should fail when the only slot is occupied")
+	}
+	if afterFailure := a.StorageReport(); afterFailure != beforeFailure {
+		t.Errorf("failed allocation changed storage report: before=%#v after=%#v", beforeFailure, afterFailure)
+	}
+
+	a.Free(alloc)
+	reused := a.Allocate(1)
+	if reused.Failed() {
+		t.Fatal("allocation after freeing the only slot failed")
+	}
+	a.Free(reused)
+
+	report := a.StorageReport()
+	if report.TotalFreeSpace != 1024 {
+		t.Errorf("TotalFreeSpace after free/reuse = %d, want 1024", report.TotalFreeSpace)
+	}
+}
+
+func TestZeroAllocationSlots(t *testing.T) {
+	a := New(1024, 0)
+
+	if alloc := a.Allocate(1); !alloc.Failed() {
+		t.Fatalf("Allocate(1) with zero allocation slots = %#v, want failure", alloc)
+	}
+}
+
+func TestExcessiveAllocationCapacityPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("New with unrepresentable allocation capacity should panic")
+		}
+	}()
+
+	New(1, math.MaxUint32)
+}
+
+func TestAllocateSplitWithoutFreeNodeFails(t *testing.T) {
+	a := New(1024, 1)
+	a.freeOffset = nodeUnused // Simulate exhausted structural metadata.
+	before := a.StorageReport()
+
+	if alloc := a.Allocate(1); !alloc.Failed() {
+		t.Fatalf("Allocate(1) without a remainder node = %#v, want failure", alloc)
+	}
+	if after := a.StorageReport(); after != before {
+		t.Errorf("failed split changed storage report: before=%#v after=%#v", before, after)
+	}
 }
 
 func TestAllocateMultiple(t *testing.T) {
@@ -274,9 +343,8 @@ func TestMaxAllocsExhaustion(t *testing.T) {
 	const maxAllocs = 8
 	a := New(1024, maxAllocs)
 
-	// Each allocation consumes a node. The initial free region also consumes
-	// one node, plus the remainder from each split. With maxAllocs=8, we can
-	// make fewer than 8 simultaneous allocations because of remainder nodes.
+	// The node pool includes enough structural slots for free regions and split
+	// remainders, while maxAllocs bounds simultaneous allocations.
 	var allocs []Allocation
 	for i := 0; i < 100; i++ {
 		alloc := a.Allocate(1)
@@ -311,6 +379,38 @@ func TestMaxAllocsExhaustion(t *testing.T) {
 		t.Error("allocation should succeed after freeing all")
 	}
 	a.Free(recovered)
+}
+
+func TestFragmentedNodeCapacity(t *testing.T) {
+	// Keep several non-adjacent holes while five of the eight allocation slots
+	// remain active. The allocator still has ample contiguous storage, and the
+	// request must be able to split one of the holes rather than fail due to
+	// exhausted structural nodes.
+	a := New(4096, 8)
+	allocs := make([]Allocation, 8)
+	for i := range allocs {
+		allocs[i] = a.Allocate(100)
+		if allocs[i].Failed() {
+			t.Fatalf("initial allocation %d failed", i)
+		}
+	}
+
+	for _, i := range []int{1, 3, 5} {
+		a.Free(allocs[i])
+	}
+
+	split := a.Allocate(62)
+	if split.Failed() {
+		t.Fatal("allocation in fragmented free space failed before maxAllocs")
+	}
+	a.Free(split)
+
+	for _, i := range []int{0, 2, 4, 6, 7} {
+		a.Free(allocs[i])
+	}
+	if report := a.StorageReport(); report.TotalFreeSpace != 4096 {
+		t.Errorf("TotalFreeSpace after cleanup = %d, want 4096", report.TotalFreeSpace)
+	}
 }
 
 func TestStorageReport(t *testing.T) {
@@ -609,6 +709,21 @@ func TestAllocateAlignedNonPowerOfTwoPanics(t *testing.T) {
 	}()
 
 	a.AllocateAligned(100, 3)
+}
+
+func TestAllocateAlignedOverflowFails(t *testing.T) {
+	const alignment = 4
+	size := uint32(math.MaxUint32)
+	a := New(size, 2)
+	before := a.StorageReport()
+
+	alloc := a.AllocateAligned(size, alignment)
+	if !alloc.Failed() {
+		t.Fatalf("AllocateAligned(%d, %d) should fail on padded-size overflow: %#v", size, alignment, alloc)
+	}
+	if after := a.StorageReport(); after != before {
+		t.Errorf("overflow failure changed storage report: before=%#v after=%#v", before, after)
+	}
 }
 
 func TestAllocateAlignedExhaustion(t *testing.T) {

@@ -79,6 +79,7 @@ type Allocator struct {
 	nodes      []node
 	freeNodes  []uint32
 	freeOffset uint32
+	allocCount uint32
 }
 
 // New creates an Allocator that manages a contiguous range of size units
@@ -91,10 +92,32 @@ func New(size, maxAllocs uint32) *Allocator {
 		size:      size,
 		maxAllocs: maxAllocs,
 	}
-	a.nodes = make([]node, maxAllocs)
-	a.freeNodes = make([]uint32, maxAllocs)
+	// A free region cannot be adjacent to another free region (Free coalesces
+	// neighbors), so with K active allocations there are at most K+1 free
+	// regions. The +1 case is reachable only below the active-allocation cap;
+	// once maxAllocs is reached, no split can add another region. Thus the
+	// reachable region count is bounded by twice maxAllocs. Keep one node for
+	// the initial free region when maxAllocs is zero.
+	nodeCount := allocatorNodeCount(maxAllocs)
+	a.nodes = make([]node, nodeCount)
+	a.freeNodes = make([]uint32, nodeCount)
 	a.reset()
 	return a
+}
+
+// allocatorNodeCount returns the maximum number of reachable spatial regions
+// while honoring maxAllocs. Keep the result representable by both int (for
+// slice lengths) and uint32 (for node indices and the NoSpace sentinel).
+func allocatorNodeCount(maxAllocs uint32) int {
+	count := uint64(maxAllocs) * 2
+	if count == 0 {
+		count = 1
+	}
+	maxInt := uint64(^uint(0) >> 1)
+	if count > uint64(NoSpace) || count > maxInt {
+		panic("galloc: maxAllocs is too large")
+	}
+	return int(count)
 }
 
 // reset reinitializes the allocator to its initial state: a single free
@@ -102,7 +125,8 @@ func New(size, maxAllocs uint32) *Allocator {
 func (a *Allocator) reset() {
 	a.freeStorage = 0
 	a.usedBinsTop = 0
-	a.freeOffset = a.maxAllocs - 1
+	a.allocCount = 0
+	a.freeOffset = uint32(len(a.freeNodes)) - 1
 
 	for i := range a.usedBins {
 		a.usedBins[i] = 0
@@ -117,8 +141,8 @@ func (a *Allocator) reset() {
 	}
 
 	// Freelist is a stack. Nodes in inverse order so that index 0 pops first.
-	for i := uint32(0); i < a.maxAllocs; i++ {
-		a.freeNodes[i] = a.maxAllocs - i - 1
+	for i := range a.freeNodes {
+		a.freeNodes[i] = uint32(len(a.freeNodes) - i - 1)
 	}
 
 	// Start state: whole storage as one big node.
@@ -141,8 +165,8 @@ func (a *Allocator) Reset() {
 func (a *Allocator) Allocate(size uint32) Allocation {
 	fail := Allocation{Offset: NoSpace, Metadata: NoSpace}
 
-	// Out of node slots?
-	if a.freeOffset == 0 {
+	// Out of advertised allocation slots?
+	if a.allocCount >= a.maxAllocs {
 		return fail
 	}
 
@@ -174,11 +198,18 @@ func (a *Allocator) Allocate(size uint32) Allocation {
 	}
 
 	binIndex := (topBinIndex << topBinsIndexShift) | leafBinIndex
-
-	// Pop the top node of the bin. Bin top = node.next.
 	nodeIndex := a.binIndices[binIndex]
 	nd := &a.nodes[nodeIndex]
 	nodeTotalSize := nd.dataSize
+
+	// Splitting a free region needs an additional node for its remainder. A
+	// fragmented layout can exhaust the node pool before maxAllocs is reached;
+	// fail cleanly instead of indexing the freelist sentinel.
+	if nodeTotalSize > size && a.freeOffset == nodeUnused {
+		return fail
+	}
+
+	// Pop the top node of the bin. Bin top = node.next.
 	nd.dataSize = size
 	nd.used = true
 	a.binIndices[binIndex] = nd.binListNext
@@ -214,6 +245,7 @@ func (a *Allocator) Allocate(size uint32) Allocation {
 		a.nodes[newNodeIndex].neighborNext = nd.neighborNext
 		nd.neighborNext = newNodeIndex
 	}
+	a.allocCount++
 
 	return Allocation{
 		Offset:   nd.dataOffset,
@@ -237,6 +269,9 @@ func (a *Allocator) AllocateAligned(size, alignment uint32) Allocation {
 	}
 	if alignment&(alignment-1) != 0 {
 		panic("galloc: alignment must be a power of two")
+	}
+	if size > NoSpace-(alignment-1) {
+		return Allocation{Offset: NoSpace, Metadata: NoSpace}
 	}
 	padded := size + alignment - 1
 	alloc := a.Allocate(padded)
@@ -264,6 +299,7 @@ func (a *Allocator) Free(alloc Allocation) {
 	if !nd.used {
 		panic("galloc: double free detected")
 	}
+	a.allocCount--
 
 	offset := nd.dataOffset
 	size := nd.dataSize
@@ -325,8 +361,9 @@ func (a *Allocator) StorageReport() StorageReport {
 	var largestFreeRegion uint32
 	var freeStorage uint32
 
-	// Out of node slots? -> report zero free space.
-	if a.freeOffset > 0 {
+	// Out of node slots? -> report zero free space. freeOffset is a stack
+	// index, so zero still represents one available node.
+	if a.freeOffset != nodeUnused {
 		freeStorage = a.freeStorage
 		if a.usedBinsTop != 0 {
 			topBinIndex := 31 - uint32(bits.LeadingZeros32(a.usedBinsTop))                    //nolint:gosec // LeadingZeros32 returns [0,32], safe for uint32
