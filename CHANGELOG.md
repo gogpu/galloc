@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-08-11
+
+### Fixed
+
+- **Honor allocation limits at boundary cases** (#2, @besmpl) — `New(1024, 1).Allocate(1)` panicked because the initial free region consumed the only allocation node. Node pool now sized at `2*maxAllocs` (math proof: K allocations → at most K+1 free regions → 2K nodes). Same bug exists in the upstream C++ [OffsetAllocator](https://github.com/sebbbi/OffsetAllocator).
+- **Track active allocations separately** — `allocCount` field enforces `maxAllocs` limit independently from structural node pool, preventing fragmented layouts from exhausting nodes before reaching the advertised limit.
+- **Reject aligned overflow** — `AllocateAligned` with near-`MaxUint32` size no longer wraps `size + alignment - 1`.
+
+### Added
+
+- 7 regression tests: single-slot, zero-capacity, fragmented-capacity, reuse, accounting, overflow, metadata-exhaustion.
+
 ## [0.2.0] - 2026-07-27
 
 ### Added
