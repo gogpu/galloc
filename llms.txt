@@ -1,0 +1,22 @@
+# galloc
+
+> O(1) offset allocator for sub-allocating one contiguous range, such as a GPU heap or buffer. Allocation and free
+> take constant time, and adjacent free regions merge on free. A Go port of Sebastian Aaltonen's C++
+> OffsetAllocator. 256 size bins (SmallFloat encoding, at most 12.5% overhead per allocation), aligned allocation,
+> no heap allocation after `New`, and a mutex-wrapped `SyncAllocator` for concurrent use. Pure Go, standard library
+> only, zero CGO, Go 1.25+. Pre-1.0: the API may change before v1.0.
+
+## Docs
+
+- [API Reference](https://pkg.go.dev/github.com/gogpu/galloc)
+- [README](https://github.com/gogpu/galloc/blob/main/README.md): overview, quick start, algorithm
+- [AGENTS.md](https://github.com/gogpu/galloc/blob/main/AGENTS.md): instructions for AI agents using galloc
+- [CHANGELOG](https://github.com/gogpu/galloc/blob/main/CHANGELOG.md): changes per release
+- [ROADMAP](https://github.com/gogpu/galloc/blob/main/ROADMAP.md): plan to v1.0
+- [CONTRIBUTING](https://github.com/gogpu/galloc/blob/main/CONTRIBUTING.md): how to contribute
+- [OffsetAllocator](https://github.com/sebbbi/OffsetAllocator): the original C++ implementation
+
+## Ecosystem
+
+- [GoGPU](https://github.com/gogpu): all modules of the GoGPU ecosystem
+- [Open Collective](https://opencollective.com/gogpu): support development
