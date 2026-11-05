@@ -18,5 +18,6 @@
 
 ## Ecosystem
 
-- [GoGPU](https://github.com/gogpu): all modules of the GoGPU ecosystem
+- [GoGPU ecosystem](https://gogpu.dev/llms.txt): map of all modules
+- [GoGPU on GitHub](https://github.com/gogpu): all repositories
 - [Open Collective](https://opencollective.com/gogpu): support development

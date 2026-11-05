@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **CI** follows the standard workflow of the GoGPU modules. The tests run with the race detector on Linux, macOS and Windows with Go oldstable and stable, and again at the `go.mod` minimum. CI also builds and tests for 386, runs golangci-lint, gofmt and `go mod tidy` checks, the two fuzz targets and govulncheck. A single required `Test` gate covers all of them. Before, CI tested only Go 1.25 and had no race, 32-bit or minimum-version runs.
+
 ## [0.2.1] - 2026-08-11
 
 ### Fixed

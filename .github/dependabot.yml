@@ -1,0 +1,13 @@
+# Keeps GitHub Actions on current majors. galloc has no dependencies and no
+# pinned tools module, so Actions are the only thing to update.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
